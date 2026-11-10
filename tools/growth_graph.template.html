@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>焦点グラフ</title>
+<style>
+:root {
+  color-scheme: light;
+  --plane: #f9f9f7;
+  --surface: #fcfcfb;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #898781;
+  --hairline: #e1e0d9;
+  --axis: #c3c2b7;
+  --border: rgba(11, 11, 11, 0.10);
+  --speaker-1: #2a78d6;
+  --speaker-2: #eb6834;
+  --speaker-3: #6250d6;
+  --frame: #1baf7a;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --plane: #0d0d0d;
+    --surface: #1a1a19;
+    --ink: #f0efec;
+    --ink-2: #c3c2b7;
+    --muted: #898781;
+    --hairline: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255, 255, 255, 0.10);
+    --speaker-1: #3987e5;
+    --speaker-2: #d95926;
+    --speaker-3: #9085e9;
+    --frame: #199e70;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--plane);
+  color: var(--ink);
+  font: 13px/1.5 system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 8px;
+}
+header { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+h1 { font-size: 15px; margin: 0; font-weight: 600; }
+.source { color: var(--muted); font-size: 12px; }
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+#graphPanel { position: relative; overflow: hidden; min-height: 0; }
+#graph { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+#graph.dragging { cursor: grabbing; }
+#legend {
+  position: absolute; left: 10px; bottom: 8px; display: flex; flex-wrap: wrap; gap: 4px 14px;
+  font-size: 11px; color: var(--ink-2); pointer-events: none; max-width: calc(100% - 20px);
+}
+#legend span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+#legend svg { flex: none; }
+#hint { position: absolute; right: 10px; top: 8px; font-size: 11px; color: var(--muted); pointer-events: none; }
+#side { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+#side section { padding: 10px 12px; }
+#side h2 { font-size: 11px; font-weight: 600; color: var(--muted); margin: 0 0 6px; letter-spacing: 0.04em; }
+#current .meta { color: var(--ink-2); font-size: 12px; display: flex; gap: 8px; align-items: center; }
+#current .text { font-size: 15px; margin: 4px 0 8px; min-height: 3em; }
+.dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; }
+dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 0; font-size: 12px; }
+dt { color: var(--muted); white-space: nowrap; }
+dd { margin: 0; min-height: 1.5em; }
+code { font: 12px ui-monospace, "SF Mono", Consolas, monospace; }
+#stack ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column-reverse; gap: 3px; }
+#stack li { border: 1px solid var(--axis); border-radius: 5px; padding: 3px 8px; font-size: 12px; display: flex; justify-content: space-between; gap: 8px; }
+#stack li.pushed { border-color: var(--frame); border-width: 2px; }
+#stack li small { color: var(--muted); }
+#stackNote { font-size: 12px; color: var(--ink-2); min-height: 1.5em; margin-top: 5px; }
+#logPanel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+#log { overflow-y: auto; flex: 1; min-height: 0; margin: 0; padding: 0; list-style: none; font-size: 12px; }
+#log li { display: grid; grid-template-columns: 34px 12px 1fr; gap: 4px; align-items: baseline; padding: 1px 0; color: var(--ink-2); cursor: pointer; }
+#log li[hidden] { display: none; }
+#log li .n { color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+#log li.now { color: var(--ink); font-weight: 600; }
+#log li.mark { box-shadow: inset 2px 0 0 var(--frame); }
+footer { grid-column: 1 / -1; padding: 8px 12px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 14px; align-items: center; }
+#controls { display: flex; gap: 6px; align-items: center; }
+button, select {
+  font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--axis);
+  border-radius: 5px; padding: 3px 9px; cursor: pointer;
+}
+button:hover { background: var(--hairline); }
+#play { min-width: 64px; }
+#position { color: var(--ink-2); font-variant-numeric: tabular-nums; min-width: 150px; }
+#timeline { width: 100%; height: 44px; display: block; cursor: pointer; touch-action: none; }
+#timelineKey { grid-column: 2; font-size: 11px; color: var(--muted); display: flex; gap: 14px; flex-wrap: wrap; }
+#tip {
+  position: fixed; z-index: 10; pointer-events: none; display: none; max-width: 320px;
+  background: var(--surface); color: var(--ink); border: 1px solid var(--axis); border-radius: 6px;
+  padding: 6px 9px; font-size: 12px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+}
+#tip b { display: block; }
+#tip .sub { color: var(--ink-2); }
+.edge { fill: none; stroke: var(--muted); }
+.edge.switch { stroke-width: 1.6; }
+.edge.add { stroke-width: 1; }
+.edge.paraphrase { stroke-width: 1; stroke-dasharray: 1.5 3; }
+.edge.topic_shift { stroke-width: 2.2; stroke-dasharray: 7 4; stroke: var(--ink-2); }
+.edge.pending { stroke-width: 1; stroke-dasharray: 1.5 3; }
+.edge.now { stroke: var(--ink); stroke-width: 2.6; }
+.node circle.body { stroke: var(--surface); stroke-width: 2; }
+.node.pre circle.body { fill: var(--muted); }
+.node.pending circle.body { fill: var(--surface); stroke: var(--muted); stroke-dasharray: 2 2; stroke-width: 1.2; }
+.node circle.ring { fill: none; stroke: var(--frame); stroke-width: 2; }
+.node circle.cursor { fill: none; stroke: var(--ink); stroke-width: 2; }
+.node { cursor: pointer; }
+.label { font-size: calc(11px * var(--k, 1)); fill: var(--ink-2); paint-order: stroke; stroke: var(--surface); stroke-width: calc(3px * var(--k, 1)); stroke-linejoin: round; pointer-events: none; }
+.label.now { fill: var(--ink); font-weight: 600; font-size: calc(13px * var(--k, 1)); }
+.label.frame { fill: var(--ink-2); font-size: calc(10px * var(--k, 1)); }
+#timeline .tick { opacity: 0.28; }
+#timeline .tick.past { opacity: 1; }
+#timeline .shift { stroke: var(--ink-2); stroke-width: 1; vector-effect: non-scaling-stroke; }
+#timeline .push { fill: var(--frame); }
+#timeline .head { stroke: var(--ink); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+@media (max-width: 900px) {
+  body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 60vh auto auto; height: auto; }
+  #side { max-height: 60vh; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title"></h1>
+  <span class="source" id="source"></span>
+</header>
+
+<div class="panel" id="graphPanel">
+  <svg id="graph" role="img" aria-label="焦点を節、焦点の移動を辺とするグラフ">
+    <defs>
+      <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+        <path d="M0,1 L10,5 L0,9 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <g id="edges"></g>
+    <g id="nodes"></g>
+    <g id="labels"></g>
+  </svg>
+  <div id="hint">ホイールで拡大縮小・ドラッグで移動・ダブルクリックで全体表示</div>
+  <div id="legend"></div>
+</div>
+
+<div id="side">
+  <section class="panel" id="current">
+    <h2>いまの発話</h2>
+    <div class="meta"><span class="dot" id="curDot"></span><span id="curMeta"></span></div>
+    <div class="text" id="curText"></div>
+    <dl>
+      <dt>焦点</dt><dd id="curFocus"></dd>
+      <dt>操作</dt><dd id="curOp"></dd>
+      <dt>参照先</dt><dd id="curRefs"></dd>
+      <dt>共有コンテキスト</dt><dd id="curContext"></dd>
+      <dt>不確実性</dt><dd id="curUncertainty"></dd>
+    </dl>
+  </section>
+  <section class="panel" id="stack">
+    <h2>構図のスタック</h2>
+    <ol id="stackList"></ol>
+    <div id="stackNote"></div>
+  </section>
+  <section class="panel" id="logPanel">
+    <h2>ここまでの発話</h2>
+    <ol id="log"></ol>
+  </section>
+</div>
+
+<footer class="panel">
+  <div id="controls">
+    <button id="prev" title="前の発話（←）">◀</button>
+    <button id="play" title="再生・停止（スペース）">再生</button>
+    <button id="next" title="次の発話（→）">▶</button>
+    <select id="speed" title="再生の速さ">
+      <option value="1">1 発話/秒</option>
+      <option value="2" selected>2 発話/秒</option>
+      <option value="5">5 発話/秒</option>
+      <option value="15">15 発話/秒</option>
+    </select>
+    <span id="position"></span>
+  </div>
+  <svg id="timeline" preserveAspectRatio="none" aria-label="発話の並び。クリックで移動"></svg>
+  <div id="timelineKey">
+    <span>棒の色＝話者</span><span>棒の高さ＝積まれた構図の数</span><span>下の印＝構図を積んだ発話</span><span>縦線＝topic_shift</span>
+  </div>
+</footer>
+
+<div id="tip"></div>
+<script type="application/json" id="data">__GROWTH_GRAPH_DATA__</script>
+<script>
+"use strict";
+const DATA = JSON.parse(document.getElementById("data").textContent);
+const U = DATA.utterances;
+const N = U.length;
+const SVG = "http://www.w3.org/2000/svg";
+const $ = (id) => document.getElementById(id);
+const el = (name, attrs = {}, parent) => {
+  const e = document.createElementNS(SVG, name);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+};
+
+/* ---- 話者の色 ---- */
+const speakers = [...new Set(U.map((u) => u.speaker))];
+if (speakers.length > 3) console.warn(`話者が ${speakers.length} 人いる。色は3人分しか用意していないため、4人目以降は同じ色になる`);
+const speakerColor = (s) => `var(--speaker-${Math.min(speakers.indexOf(s), 2) + 1})`;
+
+/* ---- 焦点グラフの組み立て ----
+   節＝焦点。同じ焦点の発話は同じ節に重なり、節が大きくなる
+   辺＝参照先の発話の焦点から当該発話の焦点への移動。種類は当該発話の操作
+   焦点が保留の発話は、その発話だけの節にする。前提は一つの節にする */
+const nodes = new Map();
+const edges = new Map();
+const indexOfId = new Map(U.map((u, i) => [u.id, i]));
+const nodeKeyOf = [];
+const edgeKeysOf = [];
+
+function ensureNode(key, label, kind, i) {
+  if (!nodes.has(key)) nodes.set(key, { key, label, kind, first: i, speaker: i >= 0 ? U[i].speaker : null, at: [], pushes: [] });
+  return nodes.get(key);
+}
+
+U.forEach((u, i) => {
+  const pending = u.focus === DATA.pending;
+  const key = pending ? `${DATA.pending}#${u.id}` : u.focus;
+  const node = ensureNode(key, pending ? `保留（${u.id}）` : u.focus, pending ? "pending" : "focus", i);
+  node.at.push(i);
+  if (u.frameOp === "push" || u.frameOp === "replace") node.pushes.push({ i, frame: u.frame });
+  nodeKeyOf.push(key);
+
+  const added = [];
+  for (const ref of u.refs) {
+    let fromKey;
+    if (ref === DATA.precontext) fromKey = ensureNode(DATA.precontext, "前提（事前のコンテキスト）", "pre", -1).key;
+    else fromKey = nodeKeyOf[indexOfId.get(ref)];
+    if (fromKey === key) continue;
+    const op = u.operation === DATA.pending ? "pending" : u.operation;
+    const ek = `${fromKey}\u0000${key}\u0000${op}`;
+    if (!edges.has(ek)) edges.set(ek, { key: ek, from: nodes.get(fromKey), to: node, op, first: i, at: [] });
+    edges.get(ek).at.push(i);
+    added.push(ek);
+  }
+  edgeKeysOf.push(added);
+});
+const nodeList = [...nodes.values()].sort((a, b) => a.first - b.first);
+const edgeList = [...edges.values()];
+console.info(`焦点グラフ: 発話 ${N} 件、節 ${nodeList.length} 個、辺 ${edgeList.length} 本`);
+
+/* ---- 配置 ----
+   最終的なグラフ全体を先に配置して固定し、進行に合わせて現れるようにする
+   登場順にらせんへ並べてからばねで整えるので、同じ入力からは同じ配置になる */
+(function layout() {
+  nodeList.forEach((d, k) => {
+    const t = 2.4 * Math.sqrt(k + 0.5);
+    d.x = 15 * t * Math.cos(t);
+    d.y = 15 * t * Math.sin(t);
+  });
+  const finalR = (d) => radius(d.at.length);
+  const STEPS = 700;
+  for (let it = 0; it < STEPS; it++) {
+    const alpha = 1 - it / STEPS;
+    const fx = new Float64Array(nodeList.length), fy = new Float64Array(nodeList.length);
+    for (let a = 0; a < nodeList.length; a++) {
+      const p = nodeList[a];
+      for (let b = a + 1; b < nodeList.length; b++) {
+        const q = nodeList[b];
+        let dx = p.x - q.x, dy = p.y - q.y;
+        let d2 = dx * dx + dy * dy;
+        if (d2 < 1) { dx = (a % 7) - 3 + 0.5; dy = (b % 5) - 2 + 0.5; d2 = dx * dx + dy * dy; }
+        if (d2 > 250000) continue;
+        const d = Math.sqrt(d2);
+        const f = 2600 / d2 + Math.max(0, finalR(p) + finalR(q) + 26 - d) * 0.5;
+        fx[a] += (dx / d) * f; fy[a] += (dy / d) * f;
+        fx[b] -= (dx / d) * f; fy[b] -= (dy / d) * f;
+      }
+    }
+    for (const e of edgeList) {
+      const a = nodeList.indexOf(e.from), b = nodeList.indexOf(e.to);
+      const dx = e.to.x - e.from.x, dy = e.to.y - e.from.y;
+      const d = Math.sqrt(dx * dx + dy * dy) || 1;
+      const f = (d - (finalR(e.from) + finalR(e.to) + 44)) * 0.06;
+      fx[a] += (dx / d) * f; fy[a] += (dy / d) * f;
+      fx[b] -= (dx / d) * f; fy[b] -= (dy / d) * f;
+    }
+    nodeList.forEach((d, k) => {
+      const gx = -d.x * 0.006, gy = -d.y * 0.006;
+      const sx = (fx[k] + gx) * alpha, sy = (fy[k] + gy) * alpha;
+      const s = Math.sqrt(sx * sx + sy * sy);
+      const cap = 12;
+      d.x += s > cap ? (sx / s) * cap : sx;
+      d.y += s > cap ? (sy / s) * cap : sy;
+    });
+  }
+})();
+
+function radius(count) { return 3.5 + 2.4 * Math.sqrt(count); }
+function countUntil(list, t) { let c = 0; while (c < list.length && list[c] <= t) c++; return c; }
+
+/* ---- 描画要素 ---- */
+const graph = $("graph");
+for (const e of edgeList) {
+  e.el = el("path", { class: `edge ${e.op}`, "marker-end": "url(#arrow)" }, $("edges"));
+}
+for (const d of nodeList) {
+  d.g = el("g", { class: `node ${d.kind === "pre" ? "pre" : d.kind === "pending" ? "pending" : ""}`, transform: `translate(${d.x},${d.y})` }, $("nodes"));
+  d.body = el("circle", { class: "body" }, d.g);
+  if (d.kind === "focus") d.body.style.fill = speakerColor(d.speaker);
+  d.ring = el("circle", { class: "ring" }, d.g);
+  d.cursor = el("circle", { class: "cursor" }, d.g);
+  d.hit = el("circle", { r: 14, fill: "transparent" }, d.g);
+  d.text = el("text", { class: "label", x: d.x, y: d.y }, $("labels"));
+  d.frameText = el("text", { class: "label frame", x: d.x, y: d.y, "text-anchor": "middle" }, $("labels"));
+  d.g.addEventListener("click", () => { if (!moved) seek(Math.max(d.first, 0)); });
+  d.g.addEventListener("pointermove", (ev) => showTip(ev, nodeTip(d)));
+  d.g.addEventListener("pointerleave", hideTip);
+}
+
+/* ---- 表示範囲（拡大縮小・移動） ---- */
+let view;
+function fitView() {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const d of nodeList) { x0 = Math.min(x0, d.x); y0 = Math.min(y0, d.y); x1 = Math.max(x1, d.x); y1 = Math.max(y1, d.y); }
+  const pad = 70;
+  view = { x: x0 - pad, y: y0 - pad, w: x1 - x0 + pad * 2, h: y1 - y0 + pad * 2 };
+  applyView();
+}
+function applyView() {
+  graph.setAttribute("viewBox", `${view.x} ${view.y} ${view.w} ${view.h}`);
+  // 文字は拡大縮小しても画面上で同じ大きさに保つ
+  const ctm = graph.getScreenCTM();
+  if (ctm) graph.style.setProperty("--k", Math.min(1 / ctm.a, 3));
+}
+window.addEventListener("resize", applyView);
+function toGraph(ev) {
+  const m = graph.getScreenCTM().inverse();
+  return new DOMPoint(ev.clientX, ev.clientY).matrixTransform(m);
+}
+graph.addEventListener("wheel", (ev) => {
+  ev.preventDefault();
+  const p = toGraph(ev);
+  const k = Math.exp(ev.deltaY * 0.0015);
+  view = { x: p.x - (p.x - view.x) * k, y: p.y - (p.y - view.y) * k, w: view.w * k, h: view.h * k };
+  applyView();
+}, { passive: false });
+let drag = null, moved = false;
+graph.addEventListener("pointerdown", (ev) => {
+  drag = { cx: ev.clientX, cy: ev.clientY, x: view.x, y: view.y, scale: 1 / graph.getScreenCTM().a };
+  moved = false;
+});
+window.addEventListener("pointermove", (ev) => {
+  if (!drag) return;
+  const dx = ev.clientX - drag.cx, dy = ev.clientY - drag.cy;
+  if (Math.abs(dx) + Math.abs(dy) > 4) { moved = true; graph.classList.add("dragging"); }
+  if (!moved) return;
+  view.x = drag.x - dx * drag.scale; view.y = drag.y - dy * drag.scale;
+  applyView();
+});
+window.addEventListener("pointerup", () => { drag = null; graph.classList.remove("dragging"); });
+graph.addEventListener("dblclick", fitView);
+
+/* ---- 発話の並び ---- */
+const timeline = $("timeline");
+const TL_H = 44, TL_BASE = 30, TL_UNIT = 8;
+timeline.setAttribute("viewBox", `0 0 ${N} ${TL_H}`);
+const ticks = U.map((u, i) => {
+  const depth = u.stack.length;
+  const h = Math.min(8 + depth * TL_UNIT, TL_BASE);
+  const r = el("rect", { class: "tick", x: i + 0.1, y: TL_BASE - h, width: 0.8, height: h }, timeline);
+  r.style.fill = speakerColor(u.speaker);
+  if (u.frameOp === "push" || u.frameOp === "replace") el("rect", { class: "push", x: i - 0.4, y: TL_BASE + 4, width: 1.8, height: 8 }, timeline);
+  if (u.operation === "topic_shift") el("line", { class: "shift", x1: i, x2: i, y1: 0, y2: TL_BASE + 2 }, timeline);
+  return r;
+});
+const head = el("line", { class: "head", y1: 0, y2: TL_H }, timeline);
+function timelineIndex(ev) {
+  const b = timeline.getBoundingClientRect();
+  return Math.max(0, Math.min(N - 1, Math.floor(((ev.clientX - b.left) / b.width) * N)));
+}
+let scrubbing = false;
+timeline.addEventListener("pointerdown", (ev) => { scrubbing = true; timeline.setPointerCapture(ev.pointerId); seek(timelineIndex(ev)); });
+timeline.addEventListener("pointermove", (ev) => {
+  const i = timelineIndex(ev);
+  if (scrubbing) seek(i);
+  const u = U[i];
+  showTip(ev, `<b>${esc(u.id)}　${esc(u.time)}　${esc(u.speaker)}</b>${esc(u.text)}<span class="sub"><br>${esc(u.focus)}</span>`);
+});
+timeline.addEventListener("pointerup", () => { scrubbing = false; });
+timeline.addEventListener("pointerleave", hideTip);
+
+/* ---- ツールチップ ---- */
+const tip = $("tip");
+function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+function showTip(ev, html) {
+  tip.innerHTML = html;
+  tip.style.display = "block";
+  const b = tip.getBoundingClientRect();
+  let x = ev.clientX + 14, y = ev.clientY + 14;
+  if (x + b.width > innerWidth - 8) x = ev.clientX - b.width - 14;
+  if (y + b.height > innerHeight - 8) y = ev.clientY - b.height - 14;
+  tip.style.left = `${Math.max(8, x)}px`;
+  tip.style.top = `${Math.max(8, y)}px`;
+}
+function hideTip() { tip.style.display = "none"; }
+function nodeTip(d) {
+  if (d.kind === "pre") return `<b>${esc(d.label)}</b><span class="sub">発話ではなく、分析範囲の前提として記録したもの</span>`;
+  const shown = d.at.filter((i) => i <= cur);
+  const ids = shown.map((i) => U[i].id);
+  const list = ids.length > 14 ? ids.slice(0, 14).join("・") + " …" : ids.join("・");
+  const pushes = d.pushes.filter((p) => p.i <= cur).map((p) => `${U[p.i].id} ${esc(U[p.i].speaker)}が${esc(p.frame)}を積んだ`).join("<br>");
+  return `<b>${esc(d.label)}</b><span class="sub">${esc(U[d.first].id)} で${esc(d.speaker)}が持ち出した<br>ここまでの発話 ${shown.length} 件: ${esc(list)}${pushes ? "<br>" + pushes : ""}</span>`;
+}
+
+/* ---- 凡例 ---- */
+(function legend() {
+  const parts = speakers.map((s) => `<span><svg width="12" height="12"><circle cx="6" cy="6" r="5" fill="${speakerColor(s)}"/></svg>${esc(s)}が持ち出した焦点</span>`);
+  parts.push(`<span><svg width="16" height="16"><circle cx="8" cy="8" r="4" fill="var(--muted)"/><circle cx="8" cy="8" r="6.5" fill="none" stroke="var(--frame)" stroke-width="2"/></svg>構図が積まれた焦点</span>`);
+  parts.push(`<span>円の大きさ＝その焦点の発話数</span>`);
+  const line = (cls, name) => `<span><svg width="30" height="8"><path class="edge ${cls}" d="M1,4 L29,4"/></svg><code>${name}</code></span>`;
+  parts.push(line("switch", "switch"), line("add", "add"), line("paraphrase", "paraphrase"), line("topic_shift", "topic_shift"));
+  $("legend").innerHTML = parts.join("");
+})();
+
+/* ---- 進行 ---- */
+let cur = -1;
+const logEl = $("log");
+const logItems = U.map((u, i) => {
+  const li = document.createElement("li");
+  li.innerHTML = `<span class="n">${esc(u.id)}</span><span class="dot" style="background:${speakerColor(u.speaker)}"></span><span>${esc(u.text)}</span>`;
+  if (u.frameOp === "push" || u.frameOp === "replace") { li.classList.add("mark"); li.title = `${u.frame}を積んだ`; }
+  li.hidden = true;
+  li.addEventListener("click", () => seek(i));
+  logEl.appendChild(li);
+  return li;
+});
+
+const TRAIL = 6;
+function render(t) {
+  const prev = cur;
+  cur = t;
+  const u = U[t];
+  const curNode = nodes.get(nodeKeyOf[t]);
+  const curEdges = new Set(edgeKeysOf[t]);
+
+  // 直近にたどった焦点には名前を出す
+  const recent = new Set();
+  for (let i = t; i >= 0 && recent.size < TRAIL; i--) recent.add(nodeKeyOf[i]);
+
+  for (const d of nodeList) {
+    const count = d.kind === "pre" ? 1 : countUntil(d.at, t);
+    const visible = d.first <= t;
+    d.g.style.display = visible ? "" : "none";
+    d.text.style.display = "none";
+    d.frameText.style.display = "none";
+    if (!visible) continue;
+    const r = d.kind === "pre" ? 6 : radius(count);
+    d.r = r;
+    d.body.setAttribute("r", r);
+    const pushes = d.pushes.filter((p) => p.i <= t);
+    d.ring.style.display = pushes.length ? "" : "none";
+    d.ring.setAttribute("r", r + 3.5);
+    d.cursor.style.display = d === curNode ? "" : "none";
+    d.cursor.setAttribute("r", r + (pushes.length ? 7.5 : 4));
+    d.hit.setAttribute("r", Math.max(r + 5, 12));
+    if (pushes.length) {
+      d.frameText.style.display = "";
+      d.frameText.textContent = [...new Set(pushes.map((p) => p.frame))].join("・");
+      d.frameText.setAttribute("y", d.y + r + 5 + 10 * labelScale());
+    }
+    if (recent.has(d.key) || d.kind === "pre") {
+      d.text.style.display = "";
+      d.text.textContent = d.label;
+      d.text.setAttribute("class", d === curNode ? "label now" : "label");
+      d.text.setAttribute("x", d.x + r + (d === curNode ? 9 : 6));
+      d.text.setAttribute("y", d.y + 4);
+    }
+  }
+  if (curNode) { $("nodes").appendChild(curNode.g); $("labels").appendChild(curNode.text); }
+
+  for (const e of edgeList) {
+    const visible = e.first <= t;
+    e.el.style.display = visible ? "" : "none";
+    if (!visible) continue;
+    e.el.setAttribute("class", `edge ${e.op}${curEdges.has(e.key) ? " now" : ""}`);
+    const dx = e.to.x - e.from.x, dy = e.to.y - e.from.y;
+    const d = Math.sqrt(dx * dx + dy * dy) || 1;
+    const ux = dx / d, uy = dy / d;
+    const sx = e.from.x + ux * (e.from.r + 2), sy = e.from.y + uy * (e.from.r + 2);
+    const tx = e.to.x - ux * (e.to.r + 5), ty = e.to.y - uy * (e.to.r + 5);
+    // 逆向きの辺と重ならないよう、進行方向の左へ少し膨らませる
+    const bend = Math.min(14, d * 0.12);
+    const mx = (sx + tx) / 2 - uy * bend, my = (sy + ty) / 2 + ux * bend;
+    e.el.setAttribute("d", `M${sx},${sy} Q${mx},${my} ${tx},${ty}`);
+  }
+
+  // いまの発話
+  $("curDot").style.background = speakerColor(u.speaker);
+  $("curMeta").textContent = `${u.id}　${u.time}　${u.speaker}`;
+  $("curText").textContent = u.text;
+  $("curFocus").textContent = u.focus;
+  $("curOp").innerHTML = u.operation === DATA.pending ? "保留" : `<code>${esc(u.operation)}</code>`;
+  $("curRefs").textContent = u.refs.join("・");
+  $("curContext").textContent = u.context;
+  $("curUncertainty").textContent = u.uncertainty;
+
+  // 構図のスタック
+  const items = [`<li><span>${esc(DATA.baseFrame)}</span><small>土台</small></li>`];
+  for (const s of u.stack) items.push(`<li class="pushed"><span>${esc(s.frame)}</span><small>${esc(s.at)} で${esc(s.by)}が積んだ</small></li>`);
+  $("stackList").innerHTML = items.join("");
+  let note = "";
+  if (u.closed) note = `<code>${esc(u.frameOp)}</code>　${esc(u.speaker)}の発話で、${esc(u.closed.frame)}（${esc(u.closed.at)} ${esc(u.closed.by)}）が閉じた`;
+  if (u.frameOp === "push") note = `<code>push ${esc(u.frame)}</code>　${esc(u.speaker)}が積んだ`;
+  if (u.frameOp === "replace") note += `　→ ${esc(u.frame)}を積んだ`;
+  if (u.frameOp === DATA.pending) note = "構図の操作は保留";
+  $("stackNote").innerHTML = note;
+
+  // 発話の一覧と並び
+  const lo = Math.min(prev, t) + 1, hi = Math.max(prev, t);
+  for (let i = Math.max(lo, 0); i <= hi; i++) { logItems[i].hidden = i > t; ticks[i].classList.toggle("past", i <= t); }
+  if (prev >= 0) logItems[prev].classList.remove("now");
+  logItems[t].classList.add("now");
+  logEl.scrollTop = logEl.scrollHeight;
+  head.setAttribute("x1", t + 0.5); head.setAttribute("x2", t + 0.5);
+  $("position").textContent = `${t + 1} / ${N}　発話 ${u.id}（${u.time}）`;
+  history.replaceState(null, "", `#t=${u.id}`);
+}
+
+function labelScale() { return Number(graph.style.getPropertyValue("--k")) || 1; }
+function seek(t) { render(Math.max(0, Math.min(N - 1, t))); }
+
+let timer = null;
+function stop() { clearInterval(timer); timer = null; $("play").textContent = "再生"; }
+function play() {
+  if (cur >= N - 1) seek(0);
+  $("play").textContent = "停止";
+  timer = setInterval(() => { if (cur >= N - 1) stop(); else seek(cur + 1); }, 1000 / Number($("speed").value));
+}
+$("play").addEventListener("click", () => (timer ? stop() : play()));
+$("speed").addEventListener("change", () => { if (timer) { stop(); play(); } });
+$("prev").addEventListener("click", () => { stop(); seek(cur - 1); });
+$("next").addEventListener("click", () => { stop(); seek(cur + 1); });
+window.addEventListener("keydown", (ev) => {
+  if (ev.target.tagName === "SELECT") return;
+  if (ev.key === "ArrowLeft") { stop(); seek(cur - 1); }
+  else if (ev.key === "ArrowRight") { stop(); seek(cur + 1); }
+  else if (ev.key === " ") { ev.preventDefault(); timer ? stop() : play(); }
+  else if (ev.key === "Home") { stop(); seek(0); }
+  else if (ev.key === "End") { stop(); seek(N - 1); }
+});
+
+/* ---- 開始 ---- */
+$("title").textContent = DATA.title;
+$("source").textContent = DATA.source;
+document.title = `焦点グラフ — ${DATA.title}`;
+fitView();
+(function start() {
+  const m = /^#t=(.+)$/.exec(decodeURIComponent(location.hash));
+  if (m) {
+    if (indexOfId.has(m[1])) return seek(indexOfId.get(m[1]));
+    console.warn(`URL の発話番号 ${m[1]} は分析表にない。先頭から始める`);
+  }
+  seek(0);
+})();
+</script>
+</body>
+</html>
