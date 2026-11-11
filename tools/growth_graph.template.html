@@ -125,7 +125,6 @@ button:hover { background: var(--hairline); }
 .label.frame { fill: var(--ink-2); font-size: calc(10px * var(--k, 1)); }
 #timeline .tick { opacity: 0.28; }
 #timeline .tick.past { opacity: 1; }
-#timeline .shift { stroke: var(--ink-2); stroke-width: 1; vector-effect: non-scaling-stroke; }
 #timeline .push { fill: var(--frame); }
 #timeline .head { stroke: var(--ink); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
 @media (max-width: 900px) {
@@ -165,9 +164,8 @@ button:hover { background: var(--hairline); }
       <dt>焦点</dt><dd id="curFocus"></dd>
       <dt>足場</dt><dd id="curFooting"></dd>
       <dt>記述</dt><dd id="curDescription"></dd>
-      <dt>操作</dt><dd id="curOp"></dd>
       <dt>参照先</dt><dd id="curRefs"></dd>
-      <dt>共有コンテキスト</dt><dd id="curContext"></dd>
+      <dt>共有コンテキストの更新</dt><dd id="curContext"></dd>
       <dt>不確実性</dt><dd id="curUncertainty"></dd>
     </dl>
   </section>
@@ -202,7 +200,7 @@ button:hover { background: var(--hairline); }
   </div>
   <svg id="timeline" preserveAspectRatio="none" aria-label="発話の並び。クリックで移動"></svg>
   <div id="timelineKey">
-    <span>棒の色＝話者</span><span>棒の高さ＝積まれた構図の数</span><span>下の印＝構図を積んだ発話</span><span>縦線＝topic_shift</span>
+    <span>棒の色＝話者</span><span>棒の高さ＝積まれた構図の数</span><span>下の印＝構図を積んだ発話</span>
   </div>
 </footer>
 
@@ -396,7 +394,6 @@ const ticks = U.map((u, i) => {
   const r = el("rect", { class: "tick", x: i + 0.1, y: TL_BASE - h, width: 0.8, height: h }, timeline);
   r.style.fill = speakerColor(u.speaker);
   if (u.frameOp === "push" || u.frameOp === "replace") el("rect", { class: "push", x: i - 0.4, y: TL_BASE + 4, width: 1.8, height: 8 }, timeline);
-  if (u.operation === "topic_shift") el("line", { class: "shift", x1: i, x2: i, y1: 0, y2: TL_BASE + 2 }, timeline);
   return r;
 });
 const head = el("line", { class: "head", y1: 0, y2: TL_H }, timeline);
@@ -555,7 +552,6 @@ function render(t) {
   $("curFocus").textContent = u.focus;
   $("curFooting").textContent = u.footing.join("・");
   $("curDescription").textContent = u.description;
-  $("curOp").innerHTML = u.operation === DATA.pending ? "保留" : `<code>${esc(u.operation)}</code>`;
   $("curRefs").textContent = u.refs.join("・");
   $("curContext").textContent = u.context;
   $("curUncertainty").textContent = u.uncertainty;

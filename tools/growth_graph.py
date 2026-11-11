@@ -2,7 +2,7 @@
 """分析結果の Markdown から、会話の進行とともに成長する焦点グラフの HTML を作る
 
 docs/analysis-policy.md の記録形式（スクリプト表と分析表）を読み、
-発話ごとの参照先・焦点（節・足場・記述）・操作・構図のスタックを JSON にして HTML テンプレートへ埋め込む
+発話ごとの参照先・焦点（節・足場・記述）・構図のスタック・共有コンテキストの更新を JSON にして HTML テンプレートへ埋め込む
 節を円、足場を辺とし、記述は節に積まれる一覧として表示する
 記録形式に合わない入力は、補わずにエラーとして止める
 
@@ -29,13 +29,11 @@ ANALYSIS_COLUMNS = [
     "当該発話の焦点",
     "足場",
     "記述",
-    "操作",
     "構図の操作",
     "共有コンテキストの更新",
     "判定上の不確実性",
 ]
-OPERATIONS = {"paraphrase", "switch", "add", "topic_shift", "保留"}
-CONTEXT_UPDATES = {"", "同意", "了解", "引受"}
+CONTEXT_UPDATES = {"", "同意", "了解", "引受", "拒否", "確認"}
 PRECONTEXT = "前提"
 PENDING = "保留"
 BASE_FRAME = "語り合い"
@@ -130,9 +128,6 @@ def build(md_path):
                     f"{lineno}行目: 参照先 {ref} が、発話 {uid} より前の分析表にない"
                 )
 
-        operation = row["操作"].strip("`").strip()
-        if operation not in OPERATIONS:
-            raise FormatError(f"{lineno}行目: 操作を読めない: {row['操作']!r}")
         context = row["共有コンテキストの更新"]
         if context not in CONTEXT_UPDATES:
             raise FormatError(f"{lineno}行目: 共有コンテキストの更新を読めない: {context!r}")
@@ -185,7 +180,6 @@ def build(md_path):
                 "focus": focus,
                 "footing": footing,
                 "description": description,
-                "operation": operation,
                 "frameOp": frame_op,
                 "frame": frame,
                 "closed": closed,
