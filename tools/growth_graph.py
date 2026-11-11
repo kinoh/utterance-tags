@@ -36,6 +36,7 @@ ANALYSIS_COLUMNS = [
 CONTEXT_UPDATES = {"", "同意", "了解", "引受", "拒否", "確認"}
 PRECONTEXT = "前提"
 PENDING = "保留"
+ZERO = "ゼロ"
 BASE_FRAME = "語り合い"
 
 
@@ -136,6 +137,11 @@ def build(md_path):
             raise FormatError(f"{lineno}行目: 当該発話の焦点が空欄")
         footing = [f.strip() for f in row["足場"].split("・") if f.strip()]
         description = row["記述"]
+        zero = description == ZERO
+        if zero:
+            description = ""
+            if footing or context:
+                raise FormatError(f"{lineno}行目: ゼロ記述の発話 {uid} に足場か共有コンテキストの更新がある")
         if focus == PENDING:
             if footing or description:
                 raise FormatError(f"{lineno}行目: 焦点が保留の発話 {uid} に足場か記述がある")
@@ -180,6 +186,7 @@ def build(md_path):
                 "focus": focus,
                 "footing": footing,
                 "description": description,
+                "zero": zero,
                 "frameOp": frame_op,
                 "frame": frame,
                 "closed": closed,
@@ -199,10 +206,11 @@ def build(md_path):
         )
     pushes = sum(1 for u in utterances if u["frameOp"] in ("push", "replace"))
     log.info(
-        "発話 %d 件、節 %d 個、記述 %d 件、構図を積む操作 %d 件",
+        "発話 %d 件、節 %d 個、記述 %d 件、ゼロ記述 %d 件、構図を積む操作 %d 件",
         len(utterances),
         len(nodes),
         sum(1 for u in utterances if u["description"]),
+        sum(1 for u in utterances if u["zero"]),
         pushes,
     )
     return {
