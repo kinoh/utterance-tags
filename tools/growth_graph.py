@@ -2,7 +2,8 @@
 """分析結果の Markdown から、会話の進行とともに成長する焦点グラフの HTML を作る
 
 docs/analysis-policy.md の記録形式（スクリプト表と分析表）を読み、
-発話ごとの参照先・焦点・操作・構図のスタックを JSON にして HTML テンプレートへ埋め込む
+発話ごとの参照先・焦点（節・足場・記述）・操作・構図のスタックを JSON にして HTML テンプレートへ埋め込む
+節を円、足場を辺とし、記述は節に積まれる一覧として表示する
 記録形式に合わない入力は、補わずにエラーとして止める
 
 使い方:
@@ -26,6 +27,8 @@ ANALYSIS_COLUMNS = [
     "発話番号",
     "参照する先行発話",
     "当該発話の焦点",
+    "足場",
+    "記述",
     "操作",
     "構図の操作",
     "共有コンテキストの更新",
@@ -110,6 +113,7 @@ def build(md_path):
     utterances = []
     seen = set()
     stack = []
+    nodes = {}  # 節の名前 -> 立てた発話番号
     for lineno, row in analysis:
         uid = row["発話番号"]
         if uid not in script:
@@ -135,6 +139,26 @@ def build(md_path):
         focus = row["当該発話の焦点"]
         if focus == "":
             raise FormatError(f"{lineno}行目: 当該発話の焦点が空欄")
+        footing = [f.strip() for f in row["足場"].split("・") if f.strip()]
+        description = row["記述"]
+        if focus == PENDING:
+            if footing or description:
+                raise FormatError(f"{lineno}行目: 焦点が保留の発話 {uid} に足場か記述がある")
+        elif footing:
+            if focus in nodes:
+                raise FormatError(
+                    f"{lineno}行目: 発話 {uid} が立てる節「{focus}」は、発話 {nodes[focus]} で既に立っている"
+                )
+            for foot in footing:
+                if foot != PRECONTEXT and foot not in nodes:
+                    raise FormatError(
+                        f"{lineno}行目: 発話 {uid} の足場「{foot}」が、それまでに立った節にない"
+                    )
+            nodes[focus] = uid
+        elif focus not in nodes:
+            raise FormatError(
+                f"{lineno}行目: 発話 {uid} の焦点「{focus}」は立っていない節で、足場も空欄"
+            )
 
         speaker = script[uid]["話者"]
         frame_op, frame = parse_frame_operation(row["構図の操作"], lineno)
@@ -159,6 +183,8 @@ def build(md_path):
                 "text": script[uid]["本文"],
                 "refs": refs,
                 "focus": focus,
+                "footing": footing,
+                "description": description,
                 "operation": operation,
                 "frameOp": frame_op,
                 "frame": frame,
@@ -179,9 +205,10 @@ def build(md_path):
         )
     pushes = sum(1 for u in utterances if u["frameOp"] in ("push", "replace"))
     log.info(
-        "発話 %d 件、焦点 %d 種類、構図を積む操作 %d 件",
+        "発話 %d 件、節 %d 個、記述 %d 件、構図を積む操作 %d 件",
         len(utterances),
-        len({u["focus"] for u in utterances if u["focus"] != PENDING}),
+        len(nodes),
+        sum(1 for u in utterances if u["description"]),
         pushes,
     )
     return {

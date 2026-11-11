@@ -78,7 +78,16 @@ code { font: 12px ui-monospace, "SF Mono", Consolas, monospace; }
 #stack li.pushed { border-color: var(--frame); border-width: 2px; }
 #stack li small { color: var(--muted); }
 #stackNote { font-size: 12px; color: var(--ink-2); min-height: 1.5em; margin-top: 5px; }
-#logPanel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+#records { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+#recordNode { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+#recordNode small { font-weight: 400; color: var(--muted); }
+#recordList { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; min-height: 0; font-size: 12px; }
+#recordList li { display: grid; grid-template-columns: 34px 12px 1fr; gap: 4px; align-items: baseline; padding: 1px 0; color: var(--ink-2); cursor: pointer; }
+#recordList li .n { color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+#recordList li.now { color: var(--ink); font-weight: 600; }
+#recordList li small { color: var(--muted); font-weight: 400; }
+#recordList li.empty { display: block; color: var(--muted); cursor: default; }
+#logPanel { flex: 0 0 22%; min-height: 0; display: flex; flex-direction: column; }
 #log { overflow-y: auto; flex: 1; min-height: 0; margin: 0; padding: 0; list-style: none; font-size: 12px; }
 #log li { display: grid; grid-template-columns: 34px 12px 1fr; gap: 4px; align-items: baseline; padding: 1px 0; color: var(--ink-2); cursor: pointer; }
 #log li[hidden] { display: none; }
@@ -103,16 +112,11 @@ button:hover { background: var(--hairline); }
 }
 #tip b { display: block; }
 #tip .sub { color: var(--ink-2); }
-.edge { fill: none; stroke: var(--muted); }
-.edge.switch { stroke-width: 1.6; }
-.edge.add { stroke-width: 1; }
-.edge.paraphrase { stroke-width: 1; stroke-dasharray: 1.5 3; }
-.edge.topic_shift { stroke-width: 2.2; stroke-dasharray: 7 4; stroke: var(--ink-2); }
-.edge.pending { stroke-width: 1; stroke-dasharray: 1.5 3; }
+.edge { fill: none; stroke: var(--muted); stroke-width: 1.4; }
 .edge.now { stroke: var(--ink); stroke-width: 2.6; }
+#jump { fill: none; stroke: var(--ink); stroke-width: 1.6; stroke-dasharray: 5 4; }
 .node circle.body { stroke: var(--surface); stroke-width: 2; }
 .node.pre circle.body { fill: var(--muted); }
-.node.pending circle.body { fill: var(--surface); stroke: var(--muted); stroke-dasharray: 2 2; stroke-width: 1.2; }
 .node circle.ring { fill: none; stroke: var(--frame); stroke-width: 2; }
 .node circle.cursor { fill: none; stroke: var(--ink); stroke-width: 2; }
 .node { cursor: pointer; }
@@ -137,13 +141,14 @@ button:hover { background: var(--hairline); }
 </header>
 
 <div class="panel" id="graphPanel">
-  <svg id="graph" role="img" aria-label="焦点を節、焦点の移動を辺とするグラフ">
+  <svg id="graph" role="img" aria-label="節を円、足場を辺とするグラフ">
     <defs>
       <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
         <path d="M0,1 L10,5 L0,9 z" fill="context-stroke"/>
       </marker>
     </defs>
     <g id="edges"></g>
+    <path id="jump" marker-end="url(#arrow)"/>
     <g id="nodes"></g>
     <g id="labels"></g>
   </svg>
@@ -158,6 +163,8 @@ button:hover { background: var(--hairline); }
     <div class="text" id="curText"></div>
     <dl>
       <dt>焦点</dt><dd id="curFocus"></dd>
+      <dt>足場</dt><dd id="curFooting"></dd>
+      <dt>記述</dt><dd id="curDescription"></dd>
       <dt>操作</dt><dd id="curOp"></dd>
       <dt>参照先</dt><dd id="curRefs"></dd>
       <dt>共有コンテキスト</dt><dd id="curContext"></dd>
@@ -168,6 +175,11 @@ button:hover { background: var(--hairline); }
     <h2>構図のスタック</h2>
     <ol id="stackList"></ol>
     <div id="stackNote"></div>
+  </section>
+  <section class="panel" id="records">
+    <h2>いまの節に積まれた記述</h2>
+    <div id="recordNode"></div>
+    <ol id="recordList"></ol>
   </section>
   <section class="panel" id="logPanel">
     <h2>ここまでの発話</h2>
@@ -216,9 +228,9 @@ if (speakers.length > 3) console.warn(`話者が ${speakers.length} 人いる。
 const speakerColor = (s) => `var(--speaker-${Math.min(speakers.indexOf(s), 2) + 1})`;
 
 /* ---- 焦点グラフの組み立て ----
-   節＝焦点。同じ焦点の発話は同じ節に重なり、節が大きくなる
-   辺＝参照先の発話の焦点から当該発話の焦点への移動。種類は当該発話の操作
-   焦点が保留の発話は、その発話だけの節にする。前提は一つの節にする */
+   節＝会話で持ち出された概念。その節を焦点とする発話が増えると、節が大きくなる
+   辺＝足場。節を立てた発話が拠り所とした既出の節から、立てた節へ引く。種類はない
+   記述は節に積まれる。焦点が保留の発話は、どの節にも入れない。前提は一つの節にする */
 const nodes = new Map();
 const edges = new Map();
 const indexOfId = new Map(U.map((u, i) => [u.id, i]));
@@ -226,28 +238,24 @@ const nodeKeyOf = [];
 const edgeKeysOf = [];
 
 function ensureNode(key, label, kind, i) {
-  if (!nodes.has(key)) nodes.set(key, { key, label, kind, first: i, speaker: i >= 0 ? U[i].speaker : null, at: [], pushes: [] });
+  if (!nodes.has(key)) nodes.set(key, { key, label, kind, first: i, speaker: i >= 0 ? U[i].speaker : null, at: [], records: [], pushes: [] });
   return nodes.get(key);
 }
 
 U.forEach((u, i) => {
-  const pending = u.focus === DATA.pending;
-  const key = pending ? `${DATA.pending}#${u.id}` : u.focus;
-  const node = ensureNode(key, pending ? `保留（${u.id}）` : u.focus, pending ? "pending" : "focus", i);
+  if (u.focus === DATA.pending) { nodeKeyOf.push(null); edgeKeysOf.push([]); return; }
+  const key = u.focus;
+  const node = ensureNode(key, u.focus, "focus", i);
   node.at.push(i);
+  if (u.description) node.records.push(i);
   if (u.frameOp === "push" || u.frameOp === "replace") node.pushes.push({ i, frame: u.frame });
   nodeKeyOf.push(key);
 
   const added = [];
-  for (const ref of u.refs) {
-    let fromKey;
-    if (ref === DATA.precontext) fromKey = ensureNode(DATA.precontext, "前提（事前のコンテキスト）", "pre", -1).key;
-    else fromKey = nodeKeyOf[indexOfId.get(ref)];
-    if (fromKey === key) continue;
-    const op = u.operation === DATA.pending ? "pending" : u.operation;
-    const ek = `${fromKey}\u0000${key}\u0000${op}`;
-    if (!edges.has(ek)) edges.set(ek, { key: ek, from: nodes.get(fromKey), to: node, op, first: i, at: [] });
-    edges.get(ek).at.push(i);
+  for (const foot of u.footing) {
+    const fromKey = foot === DATA.precontext ? ensureNode(DATA.precontext, "前提（事前のコンテキスト）", "pre", -1).key : foot;
+    const ek = `${fromKey}\u0000${key}`;
+    edges.set(ek, { key: ek, from: nodes.get(fromKey), to: node, first: i });
     added.push(ek);
   }
   edgeKeysOf.push(added);
@@ -266,6 +274,7 @@ console.info(`焦点グラフ: 発話 ${N} 件、節 ${nodeList.length} 個、�
     d.y = 15 * t * Math.sin(t);
   });
   const finalR = (d) => radius(d.at.length);
+  const LABEL_UNIT = 12, LABEL_HEIGHT = 30;
   const STEPS = 700;
   for (let it = 0; it < STEPS; it++) {
     const alpha = 1 - it / STEPS;
@@ -279,21 +288,30 @@ console.info(`焦点グラフ: 発話 ${N} 件、節 ${nodeList.length} 個、�
         if (d2 < 1) { dx = (a % 7) - 3 + 0.5; dy = (b % 5) - 2 + 0.5; d2 = dx * dx + dy * dy; }
         if (d2 > 250000) continue;
         const d = Math.sqrt(d2);
-        const f = 2600 / d2 + Math.max(0, finalR(p) + finalR(q) + 26 - d) * 0.5;
+        const f = 20000 / d2 + Math.max(0, finalR(p) + finalR(q) + 40 - d) * 0.5;
         fx[a] += (dx / d) * f; fy[a] += (dy / d) * f;
         fx[b] -= (dx / d) * f; fy[b] -= (dy / d) * f;
+        // 節の名前（円の右に出す）が重ならないよう、名前を含めた矩形どうしを縦に離す
+        const pl = p.x - finalR(p), pr = p.x + finalR(p) + 8 + LABEL_UNIT * p.label.length;
+        const ql = q.x - finalR(q), qr = q.x + finalR(q) + 8 + LABEL_UNIT * q.label.length;
+        const ox = Math.min(pr, qr) - Math.max(pl, ql);
+        const oy = LABEL_HEIGHT + Math.max(finalR(p), finalR(q)) - Math.abs(dy);
+        if (ox > 0 && oy > 0) {
+          const push = oy * 0.7 * (dy >= 0 ? 1 : -1);
+          fy[a] += push; fy[b] -= push;
+        }
       }
     }
     for (const e of edgeList) {
       const a = nodeList.indexOf(e.from), b = nodeList.indexOf(e.to);
       const dx = e.to.x - e.from.x, dy = e.to.y - e.from.y;
       const d = Math.sqrt(dx * dx + dy * dy) || 1;
-      const f = (d - (finalR(e.from) + finalR(e.to) + 44)) * 0.06;
+      const f = (d - (finalR(e.from) + finalR(e.to) + 80)) * 0.06;
       fx[a] += (dx / d) * f; fy[a] += (dy / d) * f;
       fx[b] -= (dx / d) * f; fy[b] -= (dy / d) * f;
     }
     nodeList.forEach((d, k) => {
-      const gx = -d.x * 0.006, gy = -d.y * 0.006;
+      const gx = -d.x * 0.003, gy = -d.y * 0.007;
       const sx = (fx[k] + gx) * alpha, sy = (fy[k] + gy) * alpha;
       const s = Math.sqrt(sx * sx + sy * sy);
       const cap = 12;
@@ -303,16 +321,16 @@ console.info(`焦点グラフ: 発話 ${N} 件、節 ${nodeList.length} 個、�
   }
 })();
 
-function radius(count) { return 3.5 + 2.4 * Math.sqrt(count); }
+function radius(count) { return 4 + 3 * Math.sqrt(count); }
 function countUntil(list, t) { let c = 0; while (c < list.length && list[c] <= t) c++; return c; }
 
 /* ---- 描画要素 ---- */
 const graph = $("graph");
 for (const e of edgeList) {
-  e.el = el("path", { class: `edge ${e.op}`, "marker-end": "url(#arrow)" }, $("edges"));
+  e.el = el("path", { class: "edge", "marker-end": "url(#arrow)" }, $("edges"));
 }
 for (const d of nodeList) {
-  d.g = el("g", { class: `node ${d.kind === "pre" ? "pre" : d.kind === "pending" ? "pending" : ""}`, transform: `translate(${d.x},${d.y})` }, $("nodes"));
+  d.g = el("g", { class: `node ${d.kind === "pre" ? "pre" : ""}`, transform: `translate(${d.x},${d.y})` }, $("nodes"));
   d.body = el("circle", { class: "body" }, d.g);
   if (d.kind === "focus") d.body.style.fill = speakerColor(d.speaker);
   d.ring = el("circle", { class: "ring" }, d.g);
@@ -417,16 +435,18 @@ function nodeTip(d) {
   const ids = shown.map((i) => U[i].id);
   const list = ids.length > 14 ? ids.slice(0, 14).join("・") + " …" : ids.join("・");
   const pushes = d.pushes.filter((p) => p.i <= cur).map((p) => `${U[p.i].id} ${esc(U[p.i].speaker)}が${esc(p.frame)}を積んだ`).join("<br>");
-  return `<b>${esc(d.label)}</b><span class="sub">${esc(U[d.first].id)} で${esc(d.speaker)}が持ち出した<br>ここまでの発話 ${shown.length} 件: ${esc(list)}${pushes ? "<br>" + pushes : ""}</span>`;
+  const records = d.records.filter((i) => i <= cur).length;
+  const footing = U[d.first].footing.join("・");
+  return `<b>${esc(d.label)}</b><span class="sub">${esc(U[d.first].id)} で${esc(d.speaker)}が立てた（足場: ${esc(footing)}）<br>ここまでの発話 ${shown.length} 件、うち記述 ${records} 件: ${esc(list)}${pushes ? "<br>" + pushes : ""}</span>`;
 }
 
 /* ---- 凡例 ---- */
 (function legend() {
-  const parts = speakers.map((s) => `<span><svg width="12" height="12"><circle cx="6" cy="6" r="5" fill="${speakerColor(s)}"/></svg>${esc(s)}が持ち出した焦点</span>`);
-  parts.push(`<span><svg width="16" height="16"><circle cx="8" cy="8" r="4" fill="var(--muted)"/><circle cx="8" cy="8" r="6.5" fill="none" stroke="var(--frame)" stroke-width="2"/></svg>構図が積まれた焦点</span>`);
-  parts.push(`<span>円の大きさ＝その焦点の発話数</span>`);
-  const line = (cls, name) => `<span><svg width="30" height="8"><path class="edge ${cls}" d="M1,4 L29,4"/></svg><code>${name}</code></span>`;
-  parts.push(line("switch", "switch"), line("add", "add"), line("paraphrase", "paraphrase"), line("topic_shift", "topic_shift"));
+  const parts = speakers.map((s) => `<span><svg width="12" height="12"><circle cx="6" cy="6" r="5" fill="${speakerColor(s)}"/></svg>${esc(s)}が立てた節</span>`);
+  parts.push(`<span><svg width="16" height="16"><circle cx="8" cy="8" r="4" fill="var(--muted)"/><circle cx="8" cy="8" r="6.5" fill="none" stroke="var(--frame)" stroke-width="2"/></svg>構図が積まれた節</span>`);
+  parts.push(`<span>円の大きさ＝その節を焦点とした発話数</span>`);
+  parts.push(`<span><svg width="30" height="8"><path class="edge" d="M1,4 L29,4"/></svg>足場</span>`);
+  parts.push(`<span><svg width="30" height="8"><path d="M1,4 L29,4" fill="none" stroke="var(--ink)" stroke-width="1.6" stroke-dasharray="5 4"/></svg>いまの発話での既出の節への移動</span>`);
   $("legend").innerHTML = parts.join("");
 })();
 
@@ -443,17 +463,12 @@ const logItems = U.map((u, i) => {
   return li;
 });
 
-const TRAIL = 6;
 function render(t) {
   const prev = cur;
   cur = t;
   const u = U[t];
-  const curNode = nodes.get(nodeKeyOf[t]);
+  const curNode = nodeKeyOf[t] ? nodes.get(nodeKeyOf[t]) : null;
   const curEdges = new Set(edgeKeysOf[t]);
-
-  // 直近にたどった焦点には名前を出す
-  const recent = new Set();
-  for (let i = t; i >= 0 && recent.size < TRAIL; i--) recent.add(nodeKeyOf[i]);
 
   for (const d of nodeList) {
     const count = d.kind === "pre" ? 1 : countUntil(d.at, t);
@@ -476,7 +491,7 @@ function render(t) {
       d.frameText.textContent = [...new Set(pushes.map((p) => p.frame))].join("・");
       d.frameText.setAttribute("y", d.y + r + 5 + 10 * labelScale());
     }
-    if (recent.has(d.key) || d.kind === "pre") {
+    {
       d.text.style.display = "";
       d.text.textContent = d.label;
       d.text.setAttribute("class", d === curNode ? "label now" : "label");
@@ -490,7 +505,7 @@ function render(t) {
     const visible = e.first <= t;
     e.el.style.display = visible ? "" : "none";
     if (!visible) continue;
-    e.el.setAttribute("class", `edge ${e.op}${curEdges.has(e.key) ? " now" : ""}`);
+    e.el.setAttribute("class", `edge${curEdges.has(e.key) ? " now" : ""}`);
     const dx = e.to.x - e.from.x, dy = e.to.y - e.from.y;
     const d = Math.sqrt(dx * dx + dy * dy) || 1;
     const ux = dx / d, uy = dy / d;
@@ -502,11 +517,44 @@ function render(t) {
     e.el.setAttribute("d", `M${sx},${sy} Q${mx},${my} ${tx},${ty}`);
   }
 
+  // 節を立てずに、参照先とは別の既出の節へ移った発話は、移動を破線で示す
+  const jump = $("jump");
+  jump.style.display = "none";
+  if (curNode && !u.footing.length) {
+    const from = u.refs.filter((r) => r !== DATA.precontext).map((r) => nodeKeyOf[indexOfId.get(r)]).filter(Boolean);
+    if (from.length && !from.includes(curNode.key)) {
+      const a = nodes.get(from[from.length - 1]), b = curNode;
+      const dx = b.x - a.x, dy = b.y - a.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
+      const ux = dx / d, uy = dy / d, bend = Math.min(40, d * 0.25);
+      const sx = a.x + ux * (a.r + 3), sy = a.y + uy * (a.r + 3);
+      const tx = b.x - ux * (b.r + 9), ty = b.y - uy * (b.r + 9);
+      jump.setAttribute("d", `M${sx},${sy} Q${(sx + tx) / 2 - uy * bend},${(sy + ty) / 2 + ux * bend} ${tx},${ty}`);
+      jump.style.display = "";
+    }
+  }
+
+  // いまの節に積まれた記述
+  if (curNode) {
+    $("recordNode").innerHTML = `${esc(curNode.label)} <small>${esc(U[curNode.first].id)} で${esc(curNode.speaker)}が立てた</small>`;
+    const items = curNode.records.filter((i) => i <= t).map((i) => {
+      const r = U[i];
+      const frame = r.stack.length ? ` <small>〔${esc(r.stack[r.stack.length - 1].frame)}の中〕</small>` : "";
+      return `<li data-i="${i}" class="${i === t ? "now" : ""}"><span class="n">${esc(r.id)}</span><span class="dot" style="background:${speakerColor(r.speaker)}"></span><span>${esc(r.description)}${frame}</span></li>`;
+    });
+    $("recordList").innerHTML = items.join("") || `<li class="empty">まだ記述はない</li>`;
+    $("recordList").scrollTop = $("recordList").scrollHeight;
+  } else {
+    $("recordNode").textContent = "焦点は保留";
+    $("recordList").innerHTML = "";
+  }
+
   // いまの発話
   $("curDot").style.background = speakerColor(u.speaker);
   $("curMeta").textContent = `${u.id}　${u.time}　${u.speaker}`;
   $("curText").textContent = u.text;
   $("curFocus").textContent = u.focus;
+  $("curFooting").textContent = u.footing.join("・");
+  $("curDescription").textContent = u.description;
   $("curOp").innerHTML = u.operation === DATA.pending ? "保留" : `<code>${esc(u.operation)}</code>`;
   $("curRefs").textContent = u.refs.join("・");
   $("curContext").textContent = u.context;
@@ -535,6 +583,10 @@ function render(t) {
 }
 
 function labelScale() { return Number(graph.style.getPropertyValue("--k")) || 1; }
+$("recordList").addEventListener("click", (ev) => {
+  const li = ev.target.closest("li[data-i]");
+  if (li) { stop(); seek(Number(li.dataset.i)); }
+});
 function seek(t) { render(Math.max(0, Math.min(N - 1, t))); }
 
 let timer = null;
